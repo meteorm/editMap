@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "element-ui": "^2.4.8",
+    "exif-js": "^2.3.0",
     "hermite-resize": "git+https://github.com/viliusle/Hermite-resize.git",
     "vue": "^2.5.2",
     "vue-router": "^3.0.1"

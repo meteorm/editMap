@@ -12,10 +12,10 @@
         <el-button type="primary" ref="edit" :class="{cur:curStatus==='edit'}"
          icon="el-icon-edit" @click="curStatus === 'edit' ? stopScratch() : scratch()"
           circle></el-button>
-        <el-button type="primary" ref="rotateLeft" icon="el-icon-d-arrow-left"
-         @click="rotateFn('left')" circle>Turn Left</el-button>
+        <!-- <el-button type="primary" ref="rotateLeft" icon="el-icon-d-arrow-left"
+         @click="rotateFn('left')" circle>Turn Left</el-button> -->
         <el-button type="primary" ref="rotateRight" icon="iconfont icon-arrow-right2"
-         @click="rotateFn('right')" circle>Turn Right</el-button>
+         @click="showRotatePop" circle>Turn Right</el-button>
         <el-button type="primary" ref="save" icon="iconfont icon-reset-all"
          @click="undoFn" circle>undo</el-button>
         <el-button type="primary" ref="save" icon="el-icon-upload"
@@ -25,32 +25,31 @@
     </div>
 
 </div>
-<!-- <div id="preview">
-  <canvas id="canvas_preview" width="148" height="100"></canvas>
-  <div style="margin-top:105px;padding-left:5px;">
-    <input onclick="DRAW.zoom(-1);" style="width:30px;" class="layer_add" type="button" value="-" />
-    <input onclick="DRAW.zoom(+1);" style="width:30px;" class="layer_add" type="button" value="+" />
-    <b>Zoom: </b><span id="zoom_nr">100</span>%
-    <br />
-    <input style="width:95%;" id="zoom_range" type="range" value="100" min="50" max="1000" step="50" oninput="DRAW.zoom(this.value);" />
-  </div>
-</div> -->
-<div style="display:block;position:absolute;left:0;top:50px;width:150px;background:lightBlue">
+  <div style="display:block;position:absolute;left:0;top:50px;width:150px;background:lightBlue">
       <h3 style="margin: 5px 0px;">缩放控制器</h3>
-        <input id="slider" :v-model="ZOOM" min="1" max="100" step="1"
-        @input="resize($event.target.value, true);" type="range">
+        <input id="slider" :model="ZOOM" min="1" max="100" step="1"
+        @input="zoomFn($event.target.value, true);" type="range">
         <span style="margin-right:10px;" id="slider_value" ref="slider_value">
           {{sliderValue}}</span><br/>
 
-        <label><input type="checkbox" id="workers" ref="workers" value="1">
-         Use <span id="cores"></span> {{workers}}</label>
-
-        <br />Resized in: <span id="timer" style="font-weight:bold;" ref="timer">
-          {{ccTimer}}</span> s
-
         <br /><br />
-        <!-- <canvas id="cc" ref="cc"></canvas> -->
 
+    </div>
+    <!--旋转控制-->
+    <div style="display:block;position:absolute;left:0;top:250px;width:300px;background:pink">
+      <h3 style="margin: 5px 0px;">旋转</h3>
+        <input id="angleSlider" :model="angle" value="0" min="0" max="360" step="1"
+        @input="slideRotate($event.target.value, true);" type="range">
+        <span style="margin-right:10px;" id="slider_value" ref="slider_value">
+          {{angle}}</span><br/>
+        <br /><br />
+        <div class="rotate-view">
+          <canvas id="pop_post" ref="popPost" style="position:relative;border:1px solid #393939;background-color:#ffffff;" :width="miniW" :height="miniH"></canvas>
+        </div>
+        <div>
+           <el-button type="" ref="rotateRight" @click="cancelRotate" >取消</el-button>
+         <el-button type="primary" ref="rotateRight" @click="confirmRotate" >确定</el-button>
+        </div>
     </div>
   </div>
 </template>
@@ -58,8 +57,6 @@
 <script>
 import HermiteClass from 'hermite-resize';
 import demoImg from '@/assets/demo.png';
-import zoom from './model/zoom'
-  ;
 
 export default {
   name: 'editImage',
@@ -75,9 +72,8 @@ export default {
       imgHeight: 1660,
       realCtx: null, // 源图canvas的context
       cacheMap: [],
-      angle: 10,
+      angle: 0,
       HERMITE: new HermiteClass(),
-
       canvas: null,
       img_w: 0,
       img_h: 0,
@@ -104,9 +100,15 @@ export default {
       isDrag: false,
       new_w: 0,
       new_h: 0,
+      undo_level: 0,
+      LAYERS_ARCHIVE: [],
+      RATIO: 1,
+      miniW: 190,
+      miniH: 140,
+      canvasActive: null,
     };
   },
-  mixins: { zoom },
+
   mounted() {
     // this.draw();
     this.initHermiteDemo();
@@ -117,7 +119,29 @@ export default {
     window.ondragover = (e) => { e.preventDefault(); };
   },
   methods: {
+    saveState() {
+      this.undo_level = 0;
+      const j = 0;
+      // move previous
+      this.LAYERS_ARCHIVE[2] = this.LAYERS_ARCHIVE[1];
+      this.LAYERS_ARCHIVE[1] = this.LAYERS_ARCHIVE[0];
+
+      // save last state
+      this.LAYERS_ARCHIVE[j] = {};
+      this.LAYERS_ARCHIVE[j].width = this.WIDTH;
+      this.LAYERS_ARCHIVE[j].height = this.HEIGHT;
+      this.LAYERS_ARCHIVE[j].data = {};
+      // for (const i in LAYERS) {
+      this.LAYERS_ARCHIVE[j].data.myCanvas = document.createElement('canvas');
+      this.LAYERS_ARCHIVE[j].data.myCanvas.width = this.WIDTH;
+      this.LAYERS_ARCHIVE[j].data.myCanvas.height = this.HEIGHT;
+      this.LAYERS_ARCHIVE[j].data.myCanvas.getContext('2d').drawImage(this.$refs.myCanvas, 0, 0);
+      // }
+      console.log(this.LAYERS_ARCHIVE);
+      // return true;
+    },
     get_mouse_position(event) {
+      // get mouse positon
       // console.log(event.offsetX, event.offsetY);
       let valid = true;
       let mouse_rel_x = '';
@@ -154,7 +178,7 @@ export default {
         mouse_y -= 0;
         valid = false;
       }
-      if (event.target.id == 'canvas_preview') {
+      if (event.target.id === 'canvas_preview') {
         // in preview area - relative pos
         mouse_x = mouse_rel_x;
         mouse_y = mouse_rel_y;
@@ -202,77 +226,25 @@ export default {
       // }
     },
     mouseMove(event) {
-      // if (POP != undefined && POP.active == true) {
-      //   // drag popup
-      //   if (CON.isDrag == true && popup_dragable == true) {
-      //     this.get_mouse_position(event);
-      //     popup = document.getElementById('popup');
-      //     popup.style.top = `${popup_pos_top + this.mouse.abs_y - last_pop_click[1]}px`;
-      //     popup.style.left = `${popup_pos_left + this.mouse.abs_x - last_pop_click[0]}px`;
-      //   }
-      //   return true;
-      // }
       this.get_mouse_position(event);
-      // console.log(event);
-      // if (event.target.id == 'myCanvas' && this.isDrag === true) {
-      //   this.calc_preview_by_mouse(this.mouse.x, this.mouse.y);
-      //   }
-      // LAYER.update_info_block();
-      // console.log(this.mouse.x, this.mouse.y);
-      // main window resize
+      // window resize
       if (this.ZOOM === 100) {
-        if (event.target.id == 'resize-w') {
+        if (event.target.id === 'resize-w') {
           document.body.style.cursor = 'w-resize';
-        } else if (event.target.id == 'resize-h') {
+        } else if (event.target.id === 'resize-h') {
           document.body.style.cursor = 'n-resize';
-        } else if (event.target.id == 'resize-wh') {
+        } else if (event.target.id === 'resize-wh') {
           document.body.style.cursor = 'nw-resize';
         } else { document.body.style.cursor = 'auto'; }
         if (this.resizeAll !== false && this.isDrag === true) {
           document.body.style.cursor = 'auto';
-          // if (this.resizeAll === 'w') {
-          //   this.new_w = this.mouse.x;
-          //   this.new_h = this.HEIGHT;
-          // } else if (this.resizeAll === 'h') {
-          //   this.new_w = this.WIDTH;
-          //   this.new_h = this.mouse.y;
-          // } else if (this.resizeAll === 'wh') {
-          //   this.new_w = this.mouse.x;
-          //   this.new_h = this.mouse.y;
-          // }
-          // canvas_front.clearRect(0, 0, this.WIDTH, this.HEIGHT);
-          // canvas_front.lineWidth = 1;
-          // canvas_front.fillStyle = '#ff0000';
-          // HELPER.dashedRect(canvas_front, 0, 0, new_w - 1, new_h - 1);
+
           event.preventDefault();
           // HELPER.remove_selection();
           return;
         }
       }
-      // check tools functions
-      // if (CON.isDrag === false) {
-      //   for (i in TOOLS) {
-      //     if (i == ACTION) {
-      //       TOOLS[i]('move', this.mouse, event);
-      //       break;
-      //     }
-      //   }
-      // }
-
-
       if (this.isDrag === false) return;// only drag now
-
-      // check tools functions
-      // for (i in TOOLS) {
-      //   if (i == ACTION) {
-      //     TOOLS[i]('drag', this.mouse, event);
-      //     break;
-      //   }
-      // }
-
-      // if (ACTION != 'select_square'){
-      //   TOOLS.select_square_action = '';
-      //   }
 
       this.mouseXMoveLast = this.mouse.x;
       this.mouseYMoveLast = this.mouse.y;
@@ -332,27 +304,17 @@ export default {
       this.ctx.fillRect(0, 0, 800, 800);
       this.ctx.drawImage(this.img, 0, 0);
     },
-    initImg() {
-      this.img = new Image();
-      this.img.src = this.demoImg;
-      this.img.onload = () => {
-        // this.ctx.scale(this.scaleRatio, this.scaleRatio);
-        // this.ctx.translate(0, 0);
-        // // this.ctx.rotate(-Math.PI / 10);
-        this.ctx.drawImage(this.img, 0, 0, 1664, 1660);
-        // console.log(-this.img.width / 2, -this.img.width / 2);
-        // this.savePng();
-      };
-    },
+
     scratch() {
       this.curStatus = 'edit';
       // this.ctx.translate(0, 0);
       // this.ctx.scale(1, 1);
 
       this.$refs.myCanvas.onmousedown = (e) => {
-        const downX = e.offsetX / this.scaleRatio;
-        const downY = e.offsetY / this.scaleRatio;
-
+        if (this.mouse.valid === false) return;
+        this.saveState();
+        // const downX = e.offsetX / this.scaleRatio;
+        // const downY = e.offsetY / this.scaleRatio;
         this.ctx.beginPath();
         this.ctx.lineWidth = 30;
         this.ctx.lineCap = 'round';
@@ -377,56 +339,119 @@ export default {
       this.$refs.myCanvas.onmousedown = null;
       this.$refs.myCanvas.onmousemove = null;
     },
-    rotateFn(direction) {
-      const cacheLen = this.cacheMap.length;
-      if (cacheLen > 0) {
-        this.img = this.cacheMap[cacheLen - 1];
-      }
-      this.ctx.clearRect(0, 0, 1664, 1660);
-      // this.realCtx.clearRect(0, 0, 1664, 1660);
-      if (direction === 'right') {
-        this.angle = 10;
-      } else {
-        this.angle = -10;
-      }
 
-      this.ctx.save();
-      this.ctx.fillStyle = '#cdcdcd';
-      this.ctx.fillRect(0, 0, this.imgWidth, this.imgHeight);
-      this.ctx.translate(this.img.width / 2, this.img.width / 2);
-      this.ctx.rotate((this.angle * Math.PI) / 180);
-      this.ctx.drawImage(this.img, -this.img.width / 2, -this.img.width / 2);
-      this.ctx.restore();
-      // this.realCtx.save();
-      // this.realCtx.fillStyle = '#cdcdcd';
-      // this.realCtx.fillRect(0, 0, this.imgWidth, this.imgHeight);
-      // this.realCtx.translate(this.img.width / 2, this.img.width / 2);
-      // this.realCtx.rotate((this.angle * Math.PI) / 180);
-      // this.realCtx.drawImage(this.img, -this.img.width / 2, -this.img.width / 2);
-      // this.realCtx.restore();
-      // this.savePng();
+    rotate_resize_doc(angle, w, h) {
+      debugger;
+      console.log(angle, w, h);
+
+      const o = angle * (Math.PI / 180);
+      let new_x = (w * Math.abs(Math.cos(o))) + (h * Math.abs(Math.sin(o)));
+      let new_y = (w * Math.abs(Math.sin(o))) + (h * Math.abs(Math.cos(o)));
+      new_x = Math.ceil(Math.round(new_x * 1000) / 1000);
+      new_y = Math.ceil(Math.round(new_y * 1000) / 1000);
+
+      if (this.WIDTH !== new_x || this.HEIGHT !== new_y) {
+        // this.save_state();
+        let dx = 0;
+        let dy = 0;
+        if (new_x > this.WIDTH) {
+          dx = Math.ceil(new_x - this.WIDTH) / 2;
+          this.WIDTH = new_x;
+        }
+        if (new_y > this.HEIGHT) {
+          dy = Math.ceil(new_y - this.HEIGHT) / 2;
+          this.HEIGHT = new_y;
+        }
+        this.RATIO = this.WIDTH / this.HEIGHT;
+        this.resizeSanvas('myCanvas');
+
+        // for (const i in LAYERS) {
+        const layer = this.$refs.myCanvas.getContext('2d');
+        const tmp = layer.getImageData(0, 0, this.WIDTH, this.HEIGHT);
+        console.log(tmp);
+
+        layer.clearRect(0, 0, this.WIDTH, this.HEIGHT);
+        layer.fillStyle = '#cdcdcd';
+        layer.putImageData(tmp, dx * (this.ZOOM / 100), dy * (this.ZOOM / 100));
+
+        // }
+      }
     },
-    undoFn() {
-      const cacheLen = this.cacheMap.length;
-      // console.log(cacheLen);
-      if (cacheLen > 1) {
-        this.img = this.cacheMap[cacheLen - 2];
-        this.cacheMap.splice(cacheLen - 1, 1);
-        // console.log(this.cacheMap);
-      } else if (cacheLen > 0) {
-        this.img = this.cacheMap[cacheLen - 1];
+    // rotate layer
+    rotate_layer(canvas, w, h) {
+      const TO_RADIANS = Math.PI / 180;
+
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCanvas.width = w;
+      tempCanvas.height = h;
+
+      const imageData = this.$refs.myCanvas.getContext('2d').getImageData(0, 0, w, h);
+      tempCtx.putImageData(imageData, 0, 0);
+      const canvasActiveCtx = this.$refs.myCanvas.getContext('2d');
+      // rotate
+      canvasActiveCtx.clearRect(0, 0, w, h);
+      canvasActiveCtx.save();
+      canvasActiveCtx.fillStyle = '#cdcdcd';
+      canvasActiveCtx.translate(Math.round(w / 2), Math.round(h / 2));
+      canvasActiveCtx.rotate(this.angle * TO_RADIANS);
+      canvasActiveCtx.drawImage(tempCanvas, -Math.round(w / 2), -Math.round(h / 2), w, h);
+      canvasActiveCtx.restore();
+      if (w === this.WIDTH) {
+        // DRAW.zoom();
       }
-      this.ctx.clearRect(0, 0, 1664, 1660);
-      // this.realCtx.clearRect(0, 0, 1664, 1660);
+    },
+    resizeSanvas(canvas_name, repaint) {
+      console.log('初始化的 设置canvas尺寸');
+      const W = Math.round(this.WIDTH);
+      const H = Math.round(W / this.RATIO);
+      const canvas = this.$refs[canvas_name];
+      const ctx = canvas.getContext('2d');
 
-      this.ctx.fillStyle = '#cdcdcd';
-      this.ctx.fillRect(0, 0, this.imgWidth, this.imgHeight);
-      this.ctx.drawImage(this.img, 0, 0);
+      if (repaint === false) {
+        canvas.width = W;
+        canvas.height = H;
+      } else {
+        // save
+        const buffer = document.createElement('canvas');
+        buffer.width = this.WIDTH;
+        buffer.height = this.HEIGHT;
+        buffer.getContext('2d').drawImage(canvas, 0, 0);
+        canvas.width = W;
+        canvas.height = H;
+        ctx.fillStyle = '#cdcdcd';
+        // restore
+        ctx.drawImage(buffer, 0, 0);
+      }
+    },
 
+    undoFn() {
+      console.log('undo');
+      if (this.LAYERS_ARCHIVE.length === 0) return false;
+      const j = this.undo_level;
+      console.log(`undo_level  ${this.undo_level}`);
+      this.undo_level++;
+      console.log(this.LAYERS_ARCHIVE[j]);
+      if (this.LAYERS_ARCHIVE[j] === undefined || this.LAYERS_ARCHIVE[j].width === undefined) {
+        return false;
+      }
+      if (this.WIDTH !== this.LAYERS_ARCHIVE[j].width || this.HEIGHT !== this.LAYERS_ARCHIVE[j].height) {
+        this.WIDTH = this.LAYERS_ARCHIVE[j].width;
+        this.HEIGHT = this.LAYERS_ARCHIVE[j].height;
+        this.RATIO = this.WIDTH / this.HEIGHT;
+        // this.LAYER.set_canvas_size(true);
+        // return true;// size changed, cant undo
+      }
 
-      // this.realCtx.fillStyle = '#cdcdcd';
-      // this.realCtx.fillRect(0, 0, this.imgWidth, this.imgHeight);
-      // this.realCtx.drawImage(this.img, 0, 0);
+      // undo
+      // for(var i in LAYERS){
+      if (this.LAYERS_ARCHIVE[j].data.myCanvas !== undefined) {
+        this.$refs.myCanvas.getContext('2d').clearRect(0, 0, this.WIDTH, this.HEIGHT);
+        this.$refs.myCanvas.getContext('2d').drawImage(this.LAYERS_ARCHIVE[j].data.myCanvas, 0, 0);
+      }
+      return true;
+      // }
+      // DRAW.zoom();
     },
     savePng() {
       const originCanvas = this.$refs.realCanvas;
@@ -459,7 +484,7 @@ export default {
       this.img.onload = () => {
         this.draw();
         const resizeSize = 50; // 1-100
-        this.resize(resizeSize);
+        this.zoomFn(resizeSize);
         this.setSlider(resizeSize);
       };
       this.img.src = demoImg;
@@ -467,7 +492,7 @@ export default {
     setSlider(value) {
       this.ZOOM = value;
     },
-    resize(percentages, slider) {
+    zoomFn(percentages, slider) {
       if (slider === true && this.current_size === percentages) {
         // stop event from firing twice - firefix bug
         return;
@@ -480,7 +505,41 @@ export default {
       this.canvasStyle.height = `${h}px`;
       console.log(this.canvasStyle);
     },
+    slideRotate(value, slider) {
+      if (slider === true && this.angle === value) {
+        // stop event from firing twice - firefix bug
+        return;
+      }
+      this.angle = value;
 
+      const popPostCtx = this.$refs.popPost.getContext('2d');
+      popPostCtx.save();
+      popPostCtx.fillStyle = '#cdcdcd';
+      popPostCtx.fillRect(0, 0, this.miniW, this.miniH);
+      popPostCtx.translate(this.miniW / 2, this.miniH / 2);
+      popPostCtx.rotate((this.angle * Math.PI) / 180);
+      popPostCtx.drawImage(this.img, -(this.miniW / 2), -(this.miniH / 2), this.miniW, this.miniH);
+      popPostCtx.restore();
+    },
+    showRotatePop() {
+      // 预览旋转图片
+      console.log(this.$refs.popPost);
+      const popPostCtx = this.$refs.popPost.getContext('2d');
+      popPostCtx.rect(0, 0, this.miniW, this.miniH);
+      popPostCtx.fillStyle = '#ffffff';
+      popPostCtx.fill();
+      popPostCtx.drawImage(this.$refs.myCanvas, 0, 0, this.miniW, this.miniH);
+    },
+    cancelRotate() {
+      // 取消旋转
+    },
+    confirmRotate() {
+      // 确定旋转 大图
+      // 旋转 大小重新计算
+      this.rotate_resize_doc(this.angle, this.imgWidth, this.imgHeight);
+      // 旋转图层
+      this.rotate_layer(this.$refs.myCanvas, this.WIDTH, this.HEIGHT);
+    },
   },
 };
 </script>
